@@ -26,6 +26,14 @@ To test Tensor equality, use assertEqual.
 For tests over multiple inputs, use the `@parametrize` decorator.
 For any test that checks numerics of the on-device implementation, use `instantiate_device_type_tests` to write device-generic tests.
 
+To run a single test:
+
+```bash
+python test/test_torch.py TestTorch.test_dir
+```
+
+For bug fixes, first write a standalone reproduction script to verify the failure before adding it to the test suite.
+
 # Linting
 
 Only use commands provided via `spin` for linting.
@@ -149,3 +157,33 @@ if trace_log.handlers:
   - Local files: "FX graph dump: min_cut_failed_graph.txt"
   - Production: "Use tlparse to extract artifacts" (only if tracing enabled)
 - Use `_get_unique_path()` pattern to avoid overwriting existing debug files
+
+# Architecture Overview
+
+Key top-level directories:
+
+- **c10/** — Core library (C++17, binary-size-conscious); foundational types used everywhere
+- **aten/** — ATen tensor library; PyTorch's C++ foundation (no autograd)
+  - `aten/src/ATen/native/` — Operator implementations (CPU/CUDA/MPS/sparse)
+  - `aten/src/ATen/native/native_functions.yaml` — Declarative operator registry (critical file)
+- **torch/** — Python API and bindings; `torch/csrc/` for C++ bindings
+- **torchgen/** — Code generation tooling that reads `native_functions.yaml`
+- **tools/** — Build scripts; `tools/autograd/derivatives.yaml` for autograd formulas
+
+# Code Generation
+
+Most operator changes require editing `native_functions.yaml`, not direct C++ files. It declares
+signatures, dispatch keys, and variants; `torchgen/` generates C++/Python bindings from it.
+Generated files live in `build/` — never edit them directly.
+
+# Python-C++ Integration Conventions
+
+- Always `#include <Python.h>` **first** to avoid `_XOPEN_SOURCE` redefinition errors
+- Acquire the GIL with `pybind11::gil_scoped_acquire` before calling Python API or using `THPObjectPtr`
+- Wrap C extension entry points with `HANDLE_TH_ERRORS` / `END_HANDLE_TH_ERRORS`
+- Use `TORCH_API` for exported symbols (required for Windows compatibility)
+- Prefer `CompositeExplicitAutograd` dispatch key for device-agnostic compound ops
+
+# Debugging
+
+- Set `TORCH_SHOW_CPP_STACKTRACES=1` to get C++ stack traces surfaced in Python errors
